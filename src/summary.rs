@@ -1,6 +1,6 @@
 //! One line saying what an entry does.
 
-use crate::{AuthorizedKey, Detail, Entry, SudoRule};
+use crate::{AuthorizedKey, Detail, Entry, SudoRule, UdevPair};
 
 impl Entry {
     /// What the entry does, in a line: `@reboot as root: /tmp/.x/run`,
@@ -66,6 +66,23 @@ impl Entry {
                 summary
             }
             Detail::PamInclude(file) => format!("includes {file}"),
+            Detail::UdevRule(pairs) => udev_summary(pairs, self.command.as_deref()),
+            Detail::Autostart { name, disabled } => {
+                let name = name
+                    .as_deref()
+                    .map(|n| format!("{n}: "))
+                    .unwrap_or_default();
+                let off = if *disabled { " (disabled)" } else { "" };
+                format!("at login{as_user}: {name}{command}{off}")
+            }
+            Detail::KernelModule => format!("kernel module loaded at boot: {command}"),
+            Detail::ModprobeDirective {
+                directive,
+                module,
+                arguments,
+            } => format!("{directive} {module} {arguments}")
+                .trim_end()
+                .to_owned(),
             Detail::SshdSetting {
                 key,
                 value,
@@ -76,6 +93,28 @@ impl Entry {
             },
         }
     }
+}
+
+/// What a rule runs and when (its matches), or its pairs as written.
+fn udev_summary(pairs: &[UdevPair], command: Option<&str>) -> String {
+    let matches: Vec<String> = pairs
+        .iter()
+        .filter(|p| p.operator == "==" || p.operator == "!=")
+        .map(pair_text)
+        .collect();
+    match command {
+        Some(command) => format!("on {}: runs {command}", matches.join(", ")),
+        None => pairs.iter().map(pair_text).collect::<Vec<_>>().join(", "),
+    }
+}
+
+fn pair_text(pair: &UdevPair) -> String {
+    let attribute = pair
+        .attribute
+        .as_deref()
+        .map(|a| format!("{{{a}}}"))
+        .unwrap_or_default();
+    format!("{}{attribute}{}\"{}\"", pair.key, pair.operator, pair.value)
 }
 
 fn key_summary(key: &AuthorizedKey, user: Option<&str>, command: Option<&str>) -> String {

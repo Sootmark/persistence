@@ -19,7 +19,7 @@ out=$(cd "$1" && pwd)
 docker run --rm -v "$out:/out" -e OWNER="$(id -u):$(id -g)" debian:trixie sh -euc '
     apt-get update -qq
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-        cron anacron sudo openssh-server logrotate e2fsprogs sysstat login >/dev/null
+        cron anacron sudo openssh-server logrotate e2fsprogs sysstat login udev kmod >/dev/null
     cd /
     for file in \
         etc/crontab etc/cron.d/anacron etc/cron.d/e2scrub_all etc/cron.d/sysstat \
@@ -33,13 +33,17 @@ docker run --rm -v "$out:/out" -e OWNER="$(id -u):$(id -g)" debian:trixie sh -eu
         etc/init.d/cron etc/init.d/ssh etc/init.d/sudo etc/ssh/sshd_config \
         etc/pam.d/common-auth etc/pam.d/common-account etc/pam.d/common-password \
         etc/pam.d/common-session etc/pam.d/sshd etc/pam.d/su etc/pam.d/sudo \
-        etc/pam.d/login etc/pam.d/cron etc/pam.d/other
+        etc/pam.d/login etc/pam.d/cron etc/pam.d/other \
+        usr/lib/udev/rules.d/50-udev-default.rules usr/lib/udev/rules.d/60-persistent-storage.rules \
+        usr/lib/udev/rules.d/80-drivers.rules usr/lib/udev/rules.d/99-systemd.rules \
+        usr/lib/modprobe.d/aliases.conf usr/lib/modprobe.d/fbdev-blacklist.conf \
+        usr/lib/modprobe.d/systemd.conf etc/modules-load.d/modules.conf
     do
         mkdir -p "/out/$(dirname "$file")"
         cp "$file" "/out/$file"
     done
     dpkg-query -W cron anacron sudo openssh-server logrotate e2fsprogs sysstat \
-        bash base-files apt login libpam-runtime >/out/versions.txt
+        bash base-files apt login libpam-runtime udev kmod >/out/versions.txt
     chown -R "$OWNER" /out
 '
 echo "Debian files in $out"

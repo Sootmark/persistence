@@ -1,8 +1,8 @@
 //! Where Linux and Unix attackers keep access to a host: crontabs, `at`
 //! jobs, systemd units, init scripts, SSH authorized keys and the SSH
 //! server's configuration, `rc.local` and shell start-up files,
-//! `/etc/ld.so.preload`, sudoers and PAM, read from the host files of a
-//! triage collection.
+//! `/etc/ld.so.preload`, sudoers, PAM, udev rules, XDG autostart entries
+//! and kernel modules, read from the host files of a triage collection.
 //!
 //! [`detect`] tells a file's [`Kind`] from its path on the host
 //! (`etc/crontab`, `home/alice/.ssh/authorized_keys`, `[root]/etc/sudoers`,
@@ -26,9 +26,11 @@
 //! ```
 
 mod at;
+mod autostart;
 mod base64;
 mod cron;
 mod flags;
+mod modules;
 mod pam;
 mod path;
 mod preload;
@@ -39,6 +41,7 @@ mod sudoers;
 mod summary;
 mod systemd;
 mod text;
+mod udev;
 
 pub use flags::{flags, Flag};
 pub use path::detect;
@@ -88,12 +91,24 @@ pub enum Kind {
     /// The SSH server's configuration (`etc/ssh/sshd_config`,
     /// `etc/ssh/sshd_config.d/*`).
     SshdConfig,
+    /// udev rules (`etc/udev/rules.d/*.rules`, `usr/lib/udev/rules.d`, …):
+    /// commands run as root when a matching device appears.
+    Udev,
+    /// XDG autostart entries (`etc/xdg/autostart/*.desktop`, a home's
+    /// `.config/autostart/*.desktop`): commands a desktop session starts at
+    /// login.
+    XdgAutostart,
+    /// Kernel modules loaded at boot (`etc/modules`, `modules-load.d/*`).
+    ModulesLoad,
+    /// modprobe's configuration (`modprobe.d/*.conf`).
+    Modprobe,
 }
 
 impl Kind {
     /// A short name: `crontab`, `system crontab`, `anacrontab`, `systemd
     /// unit`, `authorized keys`, `rc.local`, `shell init`, `ld.so.preload`,
-    /// `sudoers`, `at job`, `init script`, `pam`, `sshd config`.
+    /// `sudoers`, `at job`, `init script`, `pam`, `sshd config`, `udev
+    /// rule`, `xdg autostart`, `modules load`, `modprobe`.
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
@@ -110,6 +125,10 @@ impl Kind {
             Self::InitScript => "init script",
             Self::Pam => "pam",
             Self::SshdConfig => "sshd config",
+            Self::Udev => "udev rule",
+            Self::XdgAutostart => "xdg autostart",
+            Self::ModulesLoad => "modules load",
+            Self::Modprobe => "modprobe",
         }
     }
 }
@@ -245,6 +264,43 @@ pub enum Detail {
         /// for every connection.
         condition: Option<String>,
     },
+    /// A udev rule: its pairs in order; the entry's command is what it
+    /// runs.
+    UdevRule(Vec<UdevPair>),
+    /// An XDG autostart entry's command.
+    Autostart {
+        /// Its `Name=`.
+        name: Option<String>,
+        /// `Hidden=true` or `X-GNOME-Autostart-enabled=false`: not started.
+        disabled: bool,
+    },
+    /// A kernel module to load at boot, the entry's command (with its
+    /// parameters, in `etc/modules`).
+    KernelModule,
+    /// A modprobe directive: `install`, `remove`, `options`, `blacklist`,
+    /// `alias`, `softdep`, ….
+    ModprobeDirective {
+        /// The directive.
+        directive: String,
+        /// The module (or alias) it's about.
+        module: String,
+        /// The rest: for `install` and `remove`, the command run instead,
+        /// also the entry's command.
+        arguments: String,
+    },
+}
+
+/// One `KEY{attribute}op"value"` pair of a udev rule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UdevPair {
+    /// `ACTION`, `SUBSYSTEM`, `ATTR`, `RUN`, `ENV`, ….
+    pub key: String,
+    /// What's in the braces (`ATTR{idVendor}`, `RUN{builtin}`).
+    pub attribute: Option<String>,
+    /// `==` or `!=` (a match), or `=`, `+=`, `-=`, `:=` (an action).
+    pub operator: String,
+    /// The value, quotes removed and `\"` unescaped.
+    pub value: String,
 }
 
 /// A key that may log in.
@@ -343,5 +399,9 @@ pub fn parse(kind: Kind, data: &[u8], path: &str) -> Parsed {
         Kind::InitScript => shell::script(&text, Kind::InitScript, Some("root")),
         Kind::Pam => pam::rules(&text, path::pam_service(path)),
         Kind::SshdConfig => sshd::config(&text),
+        Kind::Udev => udev::rules(&text),
+        Kind::XdgAutostart => autostart::entry(&text, account),
+        Kind::ModulesLoad => modules::load_list(&text),
+        Kind::Modprobe => modules::modprobe(&text),
     }
 }

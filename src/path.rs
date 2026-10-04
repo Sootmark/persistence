@@ -72,6 +72,29 @@ pub fn detect(path: &str) -> Option<Kind> {
         ["etc", "init.d", _] | ["etc", "rc.d", "init.d", _] => Kind::InitScript,
         ["etc", "pam.d", _] | ["etc", "pam.conf"] => Kind::Pam,
         ["etc", "ssh", "sshd_config"] | ["etc", "ssh", "sshd_config.d", _] => Kind::SshdConfig,
+        ["etc" | "lib" | "run", "udev", "rules.d", name]
+        | ["usr", "lib", "udev", "rules.d", name]
+            if extension(name) == Some("rules") =>
+        {
+            Kind::Udev
+        }
+        ["etc", "xdg", "autostart", name] | [.., ".config", "autostart", name]
+            if extension(name) == Some("desktop") =>
+        {
+            Kind::XdgAutostart
+        }
+        ["etc", "modules"] => Kind::ModulesLoad,
+        ["etc" | "lib" | "run", "modules-load.d", name]
+        | ["usr", "lib", "modules-load.d", name]
+            if extension(name) == Some("conf") =>
+        {
+            Kind::ModulesLoad
+        }
+        ["etc" | "lib" | "run", "modprobe.d", name] | ["usr", "lib", "modprobe.d", name]
+            if extension(name) == Some("conf") =>
+        {
+            Kind::Modprobe
+        }
         ["etc", "anacrontab"] => Kind::Anacrontab,
         [.., ".ssh", "authorized_keys" | "authorized_keys2"] => Kind::AuthorizedKeys,
         ["etc", "rc.local"] | ["etc", "rc.d", "rc.local"] => Kind::RcLocal,
@@ -158,8 +181,8 @@ fn is_unit_name(name: &str) -> bool {
         .is_some_and(|suffix| name.len() > suffix.len() + 1 && UNIT_TYPES.contains(&suffix))
 }
 
-/// What follows the last `.`, as written: systemd and the shells' start-up
-/// scripts match it case-sensitively.
+/// What follows the last `.`, as written: systemd, the shells' start-up
+/// scripts, udev, modprobe and desktop sessions match it case-sensitively.
 fn extension(name: &str) -> Option<&str> {
     name.rsplit_once('.').map(|(_, extension)| extension)
 }

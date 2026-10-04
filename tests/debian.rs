@@ -24,7 +24,7 @@ const VENDORED: [(&str, Kind, usize); 4] = [
     ("usr/lib/systemd/system/ssh.socket", Kind::SystemdUnit, 6),
 ];
 /// Fetched by `tests/debian/fetch.sh`: path, kind and entry count.
-const FETCHED: [(&str, Kind, usize); 31] = [
+const FETCHED: [(&str, Kind, usize); 39] = [
     ("etc/crontab", Kind::SystemCrontab, 6),
     ("etc/cron.d/anacron", Kind::SystemCrontab, 3),
     ("etc/cron.d/e2scrub_all", Kind::SystemCrontab, 2),
@@ -80,6 +80,22 @@ const FETCHED: [(&str, Kind, usize); 31] = [
     ("etc/pam.d/sshd", Kind::Pam, 15),
     ("etc/pam.d/su", Kind::Pam, 8),
     ("etc/pam.d/sudo", Kind::Pam, 4),
+    ("usr/lib/udev/rules.d/50-udev-default.rules", Kind::Udev, 71),
+    (
+        "usr/lib/udev/rules.d/60-persistent-storage.rules",
+        Kind::Udev,
+        76,
+    ),
+    ("usr/lib/udev/rules.d/80-drivers.rules", Kind::Udev, 9),
+    ("usr/lib/udev/rules.d/99-systemd.rules", Kind::Udev, 36),
+    ("usr/lib/modprobe.d/aliases.conf", Kind::Modprobe, 5),
+    (
+        "usr/lib/modprobe.d/fbdev-blacklist.conf",
+        Kind::Modprobe,
+        18,
+    ),
+    ("usr/lib/modprobe.d/systemd.conf", Kind::Modprobe, 3),
+    ("etc/modules-load.d/modules.conf", Kind::ModulesLoad, 0),
 ];
 
 fn read_in(folder: &Path, path: &str) -> Parsed {

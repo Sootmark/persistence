@@ -88,6 +88,10 @@ pub enum Flag {
     /// `.ssh/authorized_keys` (`AuthorizedKeysFile`), or from a program
     /// (`AuthorizedKeysCommand`).
     KeysElsewhere,
+    /// modprobe runs a command instead of loading or unloading a module
+    /// (`install`, `remove`), other than `/bin/true` or `/bin/false`, the
+    /// usual way to block one.
+    ModprobeCommand,
 }
 
 impl Flag {
@@ -109,6 +113,7 @@ impl Flag {
             Self::RootPasswordLogin => "root may log in over SSH with a password",
             Self::EmptyPasswords => "SSH logins without a password",
             Self::KeysElsewhere => "SSH keys read from elsewhere",
+            Self::ModprobeCommand => "modprobe runs a command",
         }
     }
 }
@@ -161,6 +166,7 @@ pub fn flags(entry: &Entry) -> Vec<Flag> {
                 .is_some_and(|v| v.eq_ignore_ascii_case("yes")),
         ),
         (Flag::KeysElsewhere, keys_elsewhere(entry)),
+        (Flag::ModprobeCommand, modprobe_command(entry)),
     ]
     .into_iter()
     .filter_map(|(flag, found)| found.then_some(flag))
@@ -303,6 +309,16 @@ fn keys_elsewhere(entry: &Entry) -> bool {
     let command = sshd_setting(entry, "AuthorizedKeysCommand")
         .is_some_and(|v| !v.eq_ignore_ascii_case("none"));
     files || command
+}
+
+fn modprobe_command(entry: &Entry) -> bool {
+    let blocks = |command: &str| {
+        matches!(
+            command.trim(),
+            "/bin/true" | "/bin/false" | "/usr/bin/true" | "/usr/bin/false" | "true" | "false"
+        )
+    };
+    entry.kind == Kind::Modprobe && entry.command.as_deref().is_some_and(|c| !blocks(c))
 }
 
 #[cfg(test)]
