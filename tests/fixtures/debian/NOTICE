@@ -1,0 +1,11 @@
+Default files of a Debian 13 (trixie) system, copied unchanged from the
+debian:trixie container image. Only permissively licensed ones are kept
+here; the rest (mostly GPL) are fetched by tests/debian/fetch.sh. They're
+test data, not part of the published crate, and stay under their
+packages' licences (see /usr/share/doc/<package>/copyright on Debian):
+
+  etc/sudoers, etc/sudoers.d/README             sudo 1.9.16p2-3+deb13u2             ISC
+  usr/lib/systemd/system/ssh.{service,socket}   openssh-server 1:10.0p1-7+deb13u4   OpenSSH (BSD-style)
+
+systemd 257 (`systemd-analyze verify`) accepts the units, sudo's visudo
+the sudoers files.

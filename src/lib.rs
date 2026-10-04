@@ -1,0 +1,276 @@
+//! Where Linux and Unix attackers keep access to a host: crontabs, systemd
+//! units, SSH authorized keys, `rc.local` and shell start-up files,
+//! `/etc/ld.so.preload` and sudoers, read from the host files of a triage
+//! collection.
+//!
+//! [`detect`] tells a file's [`Kind`] from its path on the host
+//! (`etc/crontab`, `home/alice/.ssh/authorized_keys`, `[root]/etc/sudoers`,
+//! …), and [`parse`] reads it into [`Entry`]s: one per job, setting, key,
+//! command line, library or rule, with the line it's on, the account it
+//! runs as or belongs to, what it runs and when. [`flags`] lists the traits
+//! that look like an attacker's ([`Flag`]).
+//!
+//! Lines that can't be read are reported in `problems`, never fatal; no
+//! input makes these functions panic.
+//!
+//! ```
+//! use persistence::{detect, flags, parse, Flag};
+//!
+//! let path = "[root]/etc/cron.d/sysupdate";
+//! let kind = detect(path).unwrap();
+//! let parsed = parse(kind, b"@reboot root /dev/shm/.x/run\n", path);
+//! let job = &parsed.entries[0];
+//! assert_eq!(job.summary(), "@reboot as root: /dev/shm/.x/run");
+//! assert_eq!(flags(job), [Flag::TemporaryDirectory, Flag::AtReboot]);
+//! ```
+
+mod base64;
+mod cron;
+mod flags;
+mod path;
+mod preload;
+mod shell;
+mod ssh;
+mod sudoers;
+mod summary;
+mod systemd;
+mod text;
+
+pub use flags::{flags, Flag};
+pub use path::detect;
+
+/// This crate's version, for records of what parsed them.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// A kind of file, each read its own way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Kind {
+    /// A user's crontab (`var/spool/cron/crontabs/<user>`, RHEL's
+    /// `var/spool/cron/<user>`): a schedule, then the command, run as the
+    /// account the file is named after.
+    Crontab,
+    /// The system crontabs (`etc/crontab`, `etc/cron.d/*`): a schedule, the
+    /// account, then the command.
+    SystemCrontab,
+    /// `etc/anacrontab`: period, delay, job id and command, run as root.
+    Anacrontab,
+    /// A systemd unit (`.service`, `.timer`, `.path`, `.socket`) or a
+    /// drop-in (`<unit>.d/*.conf`), system-wide or a user's.
+    SystemdUnit,
+    /// `.ssh/authorized_keys` (and `authorized_keys2`): keys that may log in
+    /// as the account whose home it's in.
+    AuthorizedKeys,
+    /// `etc/rc.local`, `etc/rc.d/rc.local`: run by root at boot.
+    RcLocal,
+    /// Shell start-up files, run when an account logs in or opens a shell:
+    /// `etc/profile`, `etc/profile.d/*.sh`, `etc/bash.bashrc`, a home's
+    /// `.bashrc`, `.profile`, `.zshrc`, ….
+    ShellInit,
+    /// `etc/ld.so.preload`: libraries loaded into every dynamically linked
+    /// program.
+    LdSoPreload,
+    /// `etc/sudoers`, `etc/sudoers.d/*`: who may run what as whom.
+    Sudoers,
+}
+
+impl Kind {
+    /// A short name: `crontab`, `system crontab`, `anacrontab`, `systemd
+    /// unit`, `authorized keys`, `rc.local`, `shell init`, `ld.so.preload`,
+    /// `sudoers`.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Crontab => "crontab",
+            Self::SystemCrontab => "system crontab",
+            Self::Anacrontab => "anacrontab",
+            Self::SystemdUnit => "systemd unit",
+            Self::AuthorizedKeys => "authorized keys",
+            Self::RcLocal => "rc.local",
+            Self::ShellInit => "shell init",
+            Self::LdSoPreload => "ld.so.preload",
+            Self::Sudoers => "sudoers",
+        }
+    }
+}
+
+/// One job, setting, key, command line, library or rule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Entry {
+    /// The kind of file it's in.
+    pub kind: Kind,
+    /// Its line number, from 1 (the first line, when continued).
+    pub line: usize,
+    /// The account it runs as (cron jobs, units' commands, `rc.local`) or
+    /// belongs to (a home's keys and start-up files); for a sudoers rule,
+    /// the accounts and `%groups` it's granted to. `None` when the file
+    /// doesn't say: a system unit without `User=` runs as root unless a
+    /// drop-in says otherwise.
+    pub user: Option<String>,
+    /// What runs: the command; for a key, its forced command
+    /// (`command="…"`); for ld.so.preload, the library; for a sudoers rule,
+    /// the commands allowed.
+    pub command: Option<String>,
+    /// When it runs: cron's five fields or `@reboot`…, anacron's period,
+    /// a timer's `OnCalendar=`, `OnBootSec=`… value, as written.
+    pub schedule: Option<String>,
+    /// What else the line holds.
+    pub detail: Detail,
+}
+
+impl Entry {
+    fn new(kind: Kind, line: usize, detail: Detail) -> Self {
+        Self {
+            kind,
+            line,
+            user: None,
+            command: None,
+            schedule: None,
+            detail,
+        }
+    }
+}
+
+/// What else a line holds, by what it is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Detail {
+    /// `NAME=value` in a crontab (`SHELL`, `PATH`, `MAILTO`, …), for the
+    /// jobs after it.
+    Environment {
+        /// The variable.
+        name: String,
+        /// Its value, quotes removed.
+        value: String,
+    },
+    /// A cron job: schedule, account and command are on the entry.
+    CronJob,
+    /// An anacron job: its period is the entry's schedule.
+    AnacronJob {
+        /// Minutes anacron waits before running it.
+        delay_minutes: u32,
+        /// The job's name (`cron.daily`), naming its timestamp file.
+        id: String,
+    },
+    /// A `Key=value` line in a systemd unit.
+    UnitSetting {
+        /// `Unit`, `Service`, `Timer`, `Install`, ….
+        section: String,
+        /// `ExecStart`, `User`, `Description`, `WantedBy`, `OnCalendar`, ….
+        key: String,
+        /// The value as written, continuation lines joined.
+        value: String,
+        /// For `Exec…=`: the prefixes before the command (`-` failure
+        /// ignored, `@` own argv\[0], `:` no variable expansion, `+` and
+        /// `!` full privileges), removed from the entry's command.
+        exec_prefixes: String,
+    },
+    /// A key in `authorized_keys`.
+    AuthorizedKey(AuthorizedKey),
+    /// A command line in `rc.local` or a shell start-up file.
+    ShellCommand,
+    /// A library in ld.so.preload, the entry's command.
+    PreloadLibrary,
+    /// A sudoers rule: who may run what, where, as whom.
+    SudoRule(SudoRule),
+    /// A sudoers alias, kept as written: rules name it, it isn't expanded.
+    SudoAlias {
+        /// `User_Alias`, `Runas_Alias`, `Host_Alias` or `Cmnd_Alias`.
+        alias_kind: String,
+        /// Its name.
+        name: String,
+        /// What it stands for.
+        members: Vec<String>,
+    },
+    /// A sudoers `Defaults` line.
+    SudoDefaults {
+        /// Whom or what it applies to, with its sigil (`:alice`,
+        /// `@host`, `>root`, `!/bin/sh`), `None` for everyone.
+        scope: Option<String>,
+        /// The settings (`env_reset`, `!authenticate`, …).
+        settings: String,
+    },
+    /// `@include`, `@includedir`, `#include` or `#includedir`: more rules
+    /// read from another file, or every file in a directory.
+    SudoInclude {
+        /// The file or directory.
+        path: String,
+        /// Whether it's a directory.
+        directory: bool,
+    },
+}
+
+/// A key that may log in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthorizedKey {
+    /// Options before the key (`command="…"`, `from="…"`, `no-pty`), in
+    /// order.
+    pub options: Vec<KeyOption>,
+    /// `ssh-ed25519`, `ssh-rsa`, `ecdsa-sha2-nistp256`, ….
+    pub key_type: String,
+    /// The key, base64 as written.
+    pub key: String,
+    /// `SHA256:…`, as `ssh-keygen -l` prints it; `None` when the key isn't
+    /// valid base64.
+    pub fingerprint: Option<String>,
+    /// What follows the key, often `user@host`.
+    pub comment: Option<String>,
+}
+
+/// An option before a key: `no-pty`, or `from="198.51.100.0/24"`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyOption {
+    /// Its name, as written.
+    pub name: String,
+    /// Its value, quotes removed and `\"` unescaped.
+    pub value: Option<String>,
+}
+
+/// A sudoers rule: `users hosts = (run-as) TAGS: commands`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SudoRule {
+    /// Accounts, `%groups`, `#uids` and aliases it's granted to.
+    pub users: Vec<String>,
+    /// Hosts it applies on (`ALL`).
+    pub hosts: Vec<String>,
+    /// Whom the commands may run as, inside the parentheses
+    /// (`ALL:ALL`); `None` when not written: root.
+    pub run_as: Option<String>,
+    /// Tags and options (`NOPASSWD`, `SETENV`, `CWD=/`), for every command
+    /// they're written before.
+    pub tags: Vec<String>,
+    /// The commands, aliases or `ALL`.
+    pub commands: Vec<String>,
+}
+
+/// A file's entries.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Parsed {
+    /// Entries in file order.
+    pub entries: Vec<Entry>,
+    /// Lines that couldn't be read.
+    pub problems: Vec<String>,
+}
+
+impl Parsed {
+    fn problem(&mut self, line: usize, what: &str) {
+        self.problems.push(format!("line {line}: {what}"));
+    }
+}
+
+/// Read a file of `kind` found at `path` on the host. The path names the
+/// account for users' crontabs, keys, start-up files and units.
+#[must_use]
+pub fn parse(kind: Kind, data: &[u8], path: &str) -> Parsed {
+    let text = String::from_utf8_lossy(data);
+    let account = path::account(path);
+    match kind {
+        Kind::Crontab => cron::crontab(&text, cron::Form::User(path::file_name(path))),
+        Kind::SystemCrontab => cron::crontab(&text, cron::Form::System),
+        Kind::Anacrontab => cron::anacrontab(&text),
+        Kind::SystemdUnit => systemd::unit(&text, account),
+        Kind::AuthorizedKeys => ssh::authorized_keys(&text, account),
+        Kind::RcLocal => shell::script(&text, Kind::RcLocal, Some("root")),
+        Kind::ShellInit => shell::script(&text, Kind::ShellInit, account),
+        Kind::LdSoPreload => preload::libraries(data),
+        Kind::Sudoers => sudoers::rules(&text),
+    }
+}
