@@ -5,7 +5,7 @@ use crate::{AuthorizedKey, Detail, Entry, SudoRule};
 impl Entry {
     /// What the entry does, in a line: `@reboot as root: /tmp/.x/run`,
     /// `ExecStart as svc: /usr/bin/agent`, `alice may run ALL as ALL:ALL
-    /// (NOPASSWD)`, ….
+    /// (NOPASSWD)`, `sshd: auth sufficient pam_permit.so`, ….
     #[must_use]
     pub fn summary(&self) -> String {
         let command = self.command.as_deref().unwrap_or_default();
@@ -52,6 +52,28 @@ impl Entry {
                 let what = if *directory { "every file in " } else { "" };
                 format!("includes {what}{path}")
             }
+            Detail::AtJob { .. } if schedule.is_empty() => format!("at job{as_user}: {command}"),
+            Detail::AtJob { .. } => format!("at {schedule}{as_user}: {command}"),
+            Detail::PamRule(rule) => {
+                let mut summary = format!(
+                    "{}: {} {} {}",
+                    rule.service, rule.rule_type, rule.control, rule.module
+                );
+                for argument in &rule.arguments {
+                    summary += " ";
+                    summary += argument;
+                }
+                summary
+            }
+            Detail::PamInclude(file) => format!("includes {file}"),
+            Detail::SshdSetting {
+                key,
+                value,
+                condition,
+            } => match condition {
+                Some(condition) => format!("{key} {value} (Match {condition})"),
+                None => format!("{key} {value}"),
+            },
         }
     }
 }

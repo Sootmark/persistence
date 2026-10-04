@@ -24,7 +24,7 @@ const VENDORED: [(&str, Kind, usize); 4] = [
     ("usr/lib/systemd/system/ssh.socket", Kind::SystemdUnit, 6),
 ];
 /// Fetched by `tests/debian/fetch.sh`: path, kind and entry count.
-const FETCHED: [(&str, Kind, usize); 17] = [
+const FETCHED: [(&str, Kind, usize); 31] = [
     ("etc/crontab", Kind::SystemCrontab, 6),
     ("etc/cron.d/anacron", Kind::SystemCrontab, 3),
     ("etc/cron.d/e2scrub_all", Kind::SystemCrontab, 2),
@@ -66,6 +66,20 @@ const FETCHED: [(&str, Kind, usize); 17] = [
         Kind::SystemdUnit,
         3,
     ),
+    ("etc/init.d/cron", Kind::InitScript, 55),
+    ("etc/init.d/ssh", Kind::InitScript, 125),
+    ("etc/init.d/sudo", Kind::InitScript, 26),
+    ("etc/ssh/sshd_config", Kind::SshdConfig, 7),
+    ("etc/pam.d/common-account", Kind::Pam, 3),
+    ("etc/pam.d/common-auth", Kind::Pam, 3),
+    ("etc/pam.d/common-password", Kind::Pam, 3),
+    ("etc/pam.d/common-session", Kind::Pam, 6),
+    ("etc/pam.d/cron", Kind::Pam, 7),
+    ("etc/pam.d/login", Kind::Pam, 17),
+    ("etc/pam.d/other", Kind::Pam, 4),
+    ("etc/pam.d/sshd", Kind::Pam, 15),
+    ("etc/pam.d/su", Kind::Pam, 8),
+    ("etc/pam.d/sudo", Kind::Pam, 4),
 ];
 
 fn read_in(folder: &Path, path: &str) -> Parsed {
@@ -264,4 +278,21 @@ fn shell_start_up_files() {
     );
     // System-wide: no one account.
     assert_eq!(parsed.entries[0].user, None);
+}
+
+#[test]
+fn pam_and_sshd_config() {
+    let Some(folder) = fetched_folder() else {
+        return;
+    };
+    let auth = read_in(&folder, "etc/pam.d/common-auth");
+    assert_eq!(
+        auth.entries[0].summary(),
+        "common-auth: auth [success=1 default=ignore] pam_unix.so nullok"
+    );
+    let sshd = read_in(&folder, "etc/ssh/sshd_config");
+    assert_eq!(
+        sshd.entries[6].command.as_deref(),
+        Some("/usr/lib/openssh/sftp-server")
+    );
 }

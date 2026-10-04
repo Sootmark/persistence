@@ -62,6 +62,16 @@ pub fn detect(path: &str) -> Option<Kind> {
             Kind::Crontab
         }
         ["var", "spool", "cron", name] if !CRON_SPOOL_DIRECTORIES.contains(name) => Kind::Crontab,
+        ["var", "spool", "cron", "atjobs", name]
+        | ["var", "spool", "at", name]
+        | ["var", "at", "jobs", name]
+            if *name != ".SEQ" =>
+        {
+            Kind::AtJob
+        }
+        ["etc", "init.d", _] | ["etc", "rc.d", "init.d", _] => Kind::InitScript,
+        ["etc", "pam.d", _] | ["etc", "pam.conf"] => Kind::Pam,
+        ["etc", "ssh", "sshd_config"] | ["etc", "ssh", "sshd_config.d", _] => Kind::SshdConfig,
         ["etc", "anacrontab"] => Kind::Anacrontab,
         [.., ".ssh", "authorized_keys" | "authorized_keys2"] => Kind::AuthorizedKeys,
         ["etc", "rc.local"] | ["etc", "rc.d", "rc.local"] => Kind::RcLocal,
@@ -83,6 +93,14 @@ pub(crate) fn account(path: &str) -> Option<&str> {
     match components(path).as_slice() {
         ["home" | "Users", user, _, ..] => Some(user),
         ["root", _, ..] => Some("root"),
+        _ => None,
+    }
+}
+
+/// The service a file in `etc/pam.d` configures: its name.
+pub(crate) fn pam_service(path: &str) -> Option<&str> {
+    match components(path).as_slice() {
+        ["etc", "pam.d", service] => Some(service),
         _ => None,
     }
 }

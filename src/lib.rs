@@ -1,7 +1,8 @@
-//! Where Linux and Unix attackers keep access to a host: crontabs, systemd
-//! units, SSH authorized keys, `rc.local` and shell start-up files,
-//! `/etc/ld.so.preload` and sudoers, read from the host files of a triage
-//! collection.
+//! Where Linux and Unix attackers keep access to a host: crontabs, `at`
+//! jobs, systemd units, init scripts, SSH authorized keys and the SSH
+//! server's configuration, `rc.local` and shell start-up files,
+//! `/etc/ld.so.preload`, sudoers and PAM, read from the host files of a
+//! triage collection.
 //!
 //! [`detect`] tells a file's [`Kind`] from its path on the host
 //! (`etc/crontab`, `home/alice/.ssh/authorized_keys`, `[root]/etc/sudoers`,
@@ -24,13 +25,16 @@
 //! assert_eq!(flags(job), [Flag::TemporaryDirectory, Flag::AtReboot]);
 //! ```
 
+mod at;
 mod base64;
 mod cron;
 mod flags;
+mod pam;
 mod path;
 mod preload;
 mod shell;
 mod ssh;
+mod sshd;
 mod sudoers;
 mod summary;
 mod systemd;
@@ -71,12 +75,25 @@ pub enum Kind {
     LdSoPreload,
     /// `etc/sudoers`, `etc/sudoers.d/*`: who may run what as whom.
     Sudoers,
+    /// A job `at` queued (`var/spool/cron/atjobs/*`, `var/spool/at/*`,
+    /// `var/at/jobs/*`): commands run once, later, as the account that
+    /// queued them.
+    AtJob,
+    /// A System V init script (`etc/init.d/*`, `etc/rc.d/init.d/*`): run by
+    /// root at boot, on systems that still start them.
+    InitScript,
+    /// PAM's configuration (`etc/pam.d/*`, `etc/pam.conf`): the modules
+    /// every login goes through.
+    Pam,
+    /// The SSH server's configuration (`etc/ssh/sshd_config`,
+    /// `etc/ssh/sshd_config.d/*`).
+    SshdConfig,
 }
 
 impl Kind {
     /// A short name: `crontab`, `system crontab`, `anacrontab`, `systemd
     /// unit`, `authorized keys`, `rc.local`, `shell init`, `ld.so.preload`,
-    /// `sudoers`.
+    /// `sudoers`, `at job`, `init script`, `pam`, `sshd config`.
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
@@ -89,6 +106,10 @@ impl Kind {
             Self::ShellInit => "shell init",
             Self::LdSoPreload => "ld.so.preload",
             Self::Sudoers => "sudoers",
+            Self::AtJob => "at job",
+            Self::InitScript => "init script",
+            Self::Pam => "pam",
+            Self::SshdConfig => "sshd config",
         }
     }
 }
@@ -100,7 +121,8 @@ pub struct Entry {
     pub kind: Kind,
     /// Its line number, from 1 (the first line, when continued).
     pub line: usize,
-    /// The account it runs as (cron jobs, units' commands, `rc.local`) or
+    /// The account it runs as (cron and at jobs, units' commands,
+    /// `rc.local` and init scripts) or
     /// belongs to (a home's keys and start-up files); for a sudoers rule,
     /// the accounts and `%groups` it's granted to. `None` when the file
     /// doesn't say: a system unit without `User=` runs as root unless a
@@ -108,10 +130,12 @@ pub struct Entry {
     pub user: Option<String>,
     /// What runs: the command; for a key, its forced command
     /// (`command="…"`); for ld.so.preload, the library; for a sudoers rule,
-    /// the commands allowed.
+    /// the commands allowed; for a PAM rule, the module (`pam_exec.so`'s
+    /// program); for an sshd setting, the command it runs, if any.
     pub command: Option<String>,
     /// When it runs: cron's five fields or `@reboot`…, anacron's period,
-    /// a timer's `OnCalendar=`, `OnBootSec=`… value, as written.
+    /// a timer's `OnCalendar=`, `OnBootSec=`… value, as written; an at
+    /// job's time, from its file name (`2026-10-07T07:14Z`, UTC).
     pub schedule: Option<String>,
     /// What else the line holds.
     pub detail: Detail,
@@ -165,7 +189,8 @@ pub enum Detail {
     },
     /// A key in `authorized_keys`.
     AuthorizedKey(AuthorizedKey),
-    /// A command line in `rc.local` or a shell start-up file.
+    /// A command line in `rc.local`, an init script or a shell start-up
+    /// file.
     ShellCommand,
     /// A library in ld.so.preload, the entry's command.
     PreloadLibrary,
@@ -195,6 +220,30 @@ pub enum Detail {
         path: String,
         /// Whether it's a directory.
         directory: bool,
+    },
+    /// A command line of an at job; account, command and run time are on
+    /// the entry.
+    AtJob {
+        /// The queue, from the file name (`a`, `b`, …; `=` while running).
+        queue: Option<char>,
+        /// The job number, from the file name.
+        job: Option<u32>,
+        /// The account's id, from the header (`# atrun uid=1000`).
+        uid: Option<u32>,
+    },
+    /// A PAM rule.
+    PamRule(PamRule),
+    /// `@include`: the rules of another file in `etc/pam.d`.
+    PamInclude(String),
+    /// A setting of the SSH server.
+    SshdSetting {
+        /// The keyword, as written (`PermitRootLogin`).
+        key: String,
+        /// Its value, quotes removed.
+        value: String,
+        /// The `Match` criteria it applies under (`User backup`), `None`
+        /// for every connection.
+        condition: Option<String>,
     },
 }
 
@@ -241,6 +290,24 @@ pub struct SudoRule {
     pub commands: Vec<String>,
 }
 
+/// A PAM rule: `type control module arguments`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PamRule {
+    /// The service it's for: the file's name in `etc/pam.d`, the first
+    /// word in `etc/pam.conf`.
+    pub service: String,
+    /// `auth`, `account`, `password` or `session`, as written (a leading
+    /// `-` keeps a missing module out of the log).
+    pub rule_type: String,
+    /// `required`, `sufficient`, `include`, … or a bracketed list
+    /// (`[success=1 default=ignore]`).
+    pub control: String,
+    /// The module: a name looked up in the module directory, or a path.
+    pub module: String,
+    /// The module's arguments.
+    pub arguments: Vec<String>,
+}
+
 /// A file's entries.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Parsed {
@@ -272,5 +339,9 @@ pub fn parse(kind: Kind, data: &[u8], path: &str) -> Parsed {
         Kind::ShellInit => shell::script(&text, Kind::ShellInit, account),
         Kind::LdSoPreload => preload::libraries(data),
         Kind::Sudoers => sudoers::rules(&text),
+        Kind::AtJob => at::job(&text, path::file_name(path)),
+        Kind::InitScript => shell::script(&text, Kind::InitScript, Some("root")),
+        Kind::Pam => pam::rules(&text, path::pam_service(path)),
+        Kind::SshdConfig => sshd::config(&text),
     }
 }

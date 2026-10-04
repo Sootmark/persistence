@@ -1,10 +1,10 @@
 # persistence
 
-The files Linux and Unix attackers use to keep access to a host (crontabs, systemd units, SSH authorized keys, `rc.local` and shell start-up files, `/etc/ld.so.preload` and sudoers), read into entries that say what runs, as whom and when, and what looks suspicious. Made for triage collections (UAC's `[root]/…`), works on any copy of a host's files. One dependency, its sibling `sootmark-common` (SHA-256).
+The files Linux and Unix attackers use to keep access to a host (crontabs, `at` jobs, systemd units, init scripts, SSH authorized keys and `sshd_config`, `rc.local` and shell start-up files, `/etc/ld.so.preload`, sudoers and PAM), read into entries that say what runs, as whom and when, and what looks suspicious. Made for triage collections (UAC's `[root]/…`), works on any copy of a host's files. One dependency, its sibling `sootmark-common` (SHA-256).
 
 ```toml
 [dependencies]
-sootmark-persistence = "0.1"
+sootmark-persistence = "0.2"
 ```
 
 ```rust
@@ -27,15 +27,19 @@ if let Some(kind) = persistence::detect(path) {
   - **rc.local** and **shell start-up files** (`etc/profile`, `etc/profile.d/*.sh`, `etc/bash.bashrc`, `etc/bashrc`, zsh's, and homes' and `etc/skel`'s `.bashrc`, `.profile`, `.bash_profile`, `.zshrc`, …): each line that isn't blank or a comment, backslash continuations joined; the shell's grammar isn't read.
   - **ld.so.preload**: each library, read as glibc reads the file, its quirky comment handling included. Distributions ship none: any entry deserves a look.
   - **sudoers** (`etc/sudoers`, `etc/sudoers.d/*`): rules (users, hosts, run-as, tags such as `NOPASSWD`, commands), aliases kept as written, `Defaults` lines, `@include`/`@includedir`/`#include`/`#includedir`.
+  - **at jobs** (`var/spool/cron/atjobs/*`, RHEL's `var/spool/at/*`, BSD's `var/at/jobs/*`): the commands at's script ends with (after its `cd … || {…}` header, or in at 3.1's here-document), the account from its header, and the queue, job number and run time (UTC) from the file name.
+  - **init scripts** (`etc/init.d/*`, `etc/rc.d/init.d/*`): each command line, run by root, read as `rc.local` is.
+  - **PAM** (`etc/pam.d/*`, `etc/pam.conf`): each rule's service, type (`-` kept), control (bracketed lists included), module and arguments; `pam_exec.so`'s program as the command; `@include` lines. `#` comments anywhere on a line, as Linux-PAM reads them.
+  - **sshd_config** (`etc/ssh/sshd_config`, `etc/ssh/sshd_config.d/*`): each setting, `Keyword value` or `Keyword=value`, with the `Match` criteria it's under; `ForceCommand`, `AuthorizedKeysCommand` and `Subsystem` commands as the entry's command.
 - `Entry::summary()`: a line saying what it does (`@reboot as root: /dev/shm/.x/run`).
-- `flags(entry)`: leads, not verdicts. Commands run from `/tmp`, `/var/tmp` or `/dev/shm`; `curl`/`wget` piped to a shell; base64 decoding; `nc`, `ncat`, `socat` or bash's `/dev/tcp`; `@reboot` jobs; keys with a forced command; any ld.so.preload library; sudo `NOPASSWD: ALL` or `Defaults !authenticate`.
+- `flags(entry)`: leads, not verdicts. Commands run from `/tmp`, `/var/tmp` or `/dev/shm`; `curl`/`wget` piped to a shell; base64 decoding; `nc`, `ncat`, `socat` or bash's `/dev/tcp`; `@reboot` jobs; keys with a forced command; any ld.so.preload library; sudo `NOPASSWD: ALL` or `Defaults !authenticate`; PAM's `pam_exec.so`, `auth sufficient pam_permit.so` and modules given by a path outside `/lib…/security`; `PermitRootLogin yes`, `PermitEmptyPasswords yes`, and keys read from elsewhere than the homes' `.ssh/authorized_keys` (`AuthorizedKeysFile`, `AuthorizedKeysCommand`).
 
-Not read here: `at` jobs, init.d scripts, udev rules, PAM, `sshd_config`, XDG autostart, kernel modules.
+Not read here: udev rules, XDG autostart, kernel modules, `ssh_config`.
 
 ## How it's checked
 
 - A Debian 13 system's default files: every one detected and read without a problem, values as Debian wrote them, entry counts, and not one flag raised. The permissively licensed ones (sudoers, OpenSSH's units) are vendored in `tests/fixtures/debian/` (see `NOTICE`); the rest are GPL-licensed, so CI copies them from a debian:trixie container (`tests/debian/fetch.sh <folder>`, then `SOOTMARK_PERSISTENCE_DEBIAN=<folder> cargo test --test debian`).
-- Files written as an attacker might leave them (`tests/fixtures/synthetic/`, documentation addresses only), each format's syntax covered: what runs, as whom, when, and what's flagged. systemd 257's `systemd-analyze verify` accepts every unit in both sets, visudo the sudoers files, Debian's cron (`crontab -n`) the synthetic crontabs.
+- Files written as an attacker might leave them (`tests/fixtures/synthetic/`, documentation addresses only), each format's syntax covered: what runs, as whom, when, and what's flagged. systemd 257's `systemd-analyze verify` accepts every unit in both sets, visudo the sudoers files, Debian's cron (`crontab -n`) the synthetic crontabs, OpenSSH's `sshd -t` the synthetic sshd snippet; the synthetic at job is laid out as Debian 13's at 3.2.5 writes them.
 - Fingerprints as `ssh-keygen -lf` prints them (OpenSSH 10.0 and 10.3), for Ed25519, RSA and ECDSA keys made for the tests.
 - ld.so.preload as glibc 2.41 reads it: the libraries it tried to load from the same files, and its comment loop transliterated and compared.
 - Property tests: arbitrary bytes, text made of the formats' punctuation, and the fixtures damaged anywhere, read as every kind, give entries or problems, never a panic.

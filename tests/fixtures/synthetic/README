@@ -2,4 +2,5 @@ Files written for these tests, as an attacker might leave them. Addresses
 are from the documentation ranges (RFC 5737) and domains are example.*;
 the SSH keys were made for these tests and their private halves deleted.
 systemd 257 (`systemd-analyze verify`), visudo and Debian's cron
-(`crontab -n`) accept them.
+(`crontab -n`) accept them, and OpenSSH's `sshd -t` the sshd snippet;
+the at job is laid out as Debian 13's at 3.2.5 writes them.

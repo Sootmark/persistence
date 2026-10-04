@@ -5,7 +5,7 @@
 
 use std::fmt;
 
-use crate::{Detail, Entry, Kind};
+use crate::{Detail, Entry, Kind, PamRule};
 
 /// Where files vanish at reboot or that anyone can write to.
 const TEMPORARY_DIRECTORIES: [&str; 3] = ["/tmp", "/var/tmp", "/dev/shm"];
@@ -36,6 +36,14 @@ const DECODING_FUNCTIONS: [&str; 4] = [
     "decode_base64",
 ];
 
+/// Where `sshd` looks for keys unless told otherwise.
+const DEFAULT_KEY_FILES: [&str; 4] = [
+    ".ssh/authorized_keys",
+    ".ssh/authorized_keys2",
+    "%h/.ssh/authorized_keys",
+    "%h/.ssh/authorized_keys2",
+];
+
 /// A suspicious trait.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Flag {
@@ -63,6 +71,23 @@ pub enum Flag {
     /// sudo without a password for every command (`NOPASSWD: ALL`), or
     /// without authentication at all (`Defaults !authenticate`).
     SudoWithoutPassword,
+    /// A PAM rule running a program (`pam_exec.so`): at every login, with
+    /// the password if `expose_authtok` is set.
+    PamExec,
+    /// `auth sufficient pam_permit.so`: any password accepted.
+    PamAcceptsAnyPassword,
+    /// A PAM module given by a path outside the system's module
+    /// directories (`/lib/…/security`, `/usr/lib/…/security`).
+    PamModuleElsewhere,
+    /// `PermitRootLogin yes`: root may log in over SSH with a password.
+    RootPasswordLogin,
+    /// `PermitEmptyPasswords yes`: accounts without a password may log in
+    /// over SSH.
+    EmptyPasswords,
+    /// Keys `sshd` accepts read from somewhere else than the homes'
+    /// `.ssh/authorized_keys` (`AuthorizedKeysFile`), or from a program
+    /// (`AuthorizedKeysCommand`).
+    KeysElsewhere,
 }
 
 impl Flag {
@@ -78,6 +103,12 @@ impl Flag {
             Self::ForcedCommand => "key with a forced command",
             Self::Preload => "library preloaded into every program",
             Self::SudoWithoutPassword => "sudo without a password",
+            Self::PamExec => "PAM runs a program",
+            Self::PamAcceptsAnyPassword => "PAM accepts any password",
+            Self::PamModuleElsewhere => "PAM module outside the module directories",
+            Self::RootPasswordLogin => "root may log in over SSH with a password",
+            Self::EmptyPasswords => "SSH logins without a password",
+            Self::KeysElsewhere => "SSH keys read from elsewhere",
         }
     }
 }
@@ -108,6 +139,28 @@ pub fn flags(entry: &Entry) -> Vec<Flag> {
             Flag::SudoWithoutPassword,
             sudo_without_password(&entry.detail),
         ),
+        (
+            Flag::PamExec,
+            pam_rule(entry).is_some_and(|r| r.module_name() == "pam_exec.so"),
+        ),
+        (
+            Flag::PamAcceptsAnyPassword,
+            pam_rule(entry).is_some_and(accepts_any_password),
+        ),
+        (
+            Flag::PamModuleElsewhere,
+            pam_rule(entry).is_some_and(|r| module_elsewhere(&r.module)),
+        ),
+        (
+            Flag::RootPasswordLogin,
+            sshd_setting(entry, "PermitRootLogin").is_some_and(|v| v.eq_ignore_ascii_case("yes")),
+        ),
+        (
+            Flag::EmptyPasswords,
+            sshd_setting(entry, "PermitEmptyPasswords")
+                .is_some_and(|v| v.eq_ignore_ascii_case("yes")),
+        ),
+        (Flag::KeysElsewhere, keys_elsewhere(entry)),
     ]
     .into_iter()
     .filter_map(|(flag, found)| found.then_some(flag))
@@ -205,6 +258,51 @@ fn sudo_without_password(detail: &Detail) -> bool {
             .any(|setting| setting.trim() == "!authenticate"),
         _ => false,
     }
+}
+
+fn pam_rule(entry: &Entry) -> Option<&PamRule> {
+    match &entry.detail {
+        Detail::PamRule(rule) => Some(rule),
+        _ => None,
+    }
+}
+
+fn accepts_any_password(rule: &PamRule) -> bool {
+    rule.kind() == "auth" && rule.control == "sufficient" && rule.module_name() == "pam_permit.so"
+}
+
+/// A path not of the form `/lib/…/security/x.so` or
+/// `/usr/lib…/…/security/x.so`.
+fn module_elsewhere(module: &str) -> bool {
+    let Some((directory, _)) = module.rsplit_once('/') else {
+        return false;
+    };
+    let in_library = ["/lib", "/usr/lib"]
+        .iter()
+        .any(|root| directory.starts_with(root));
+    !(in_library && directory.ends_with("/security"))
+}
+
+/// The value of an sshd setting named `key` (any case).
+fn sshd_setting<'e>(entry: &'e Entry, key: &str) -> Option<&'e str> {
+    match &entry.detail {
+        Detail::SshdSetting {
+            key: written,
+            value,
+            ..
+        } if written.eq_ignore_ascii_case(key) => Some(value),
+        _ => None,
+    }
+}
+
+fn keys_elsewhere(entry: &Entry) -> bool {
+    let files = sshd_setting(entry, "AuthorizedKeysFile").is_some_and(|v| {
+        v.split_whitespace()
+            .any(|f| !DEFAULT_KEY_FILES.contains(&f))
+    });
+    let command = sshd_setting(entry, "AuthorizedKeysCommand")
+        .is_some_and(|v| !v.eq_ignore_ascii_case("none"));
+    files || command
 }
 
 #[cfg(test)]
