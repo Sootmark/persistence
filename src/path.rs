@@ -97,7 +97,9 @@ pub fn detect(path: &str) -> Option<Kind> {
         }
         ["etc", "anacrontab"] => Kind::Anacrontab,
         [.., ".ssh", "authorized_keys" | "authorized_keys2"] => Kind::AuthorizedKeys,
-        ["etc", "rc.local"] | ["etc", "rc.d", "rc.local"] => Kind::RcLocal,
+        ["etc", "rc.local"] | ["etc", "rc.d", "rc.local"] | ["etc", "rc.local.d", "local.sh"] => {
+            Kind::RcLocal
+        }
         ["etc", "ld.so.preload"] => Kind::LdSoPreload,
         ["etc", "sudoers"]
         | ["etc", "sudoers.d", _]
@@ -250,6 +252,7 @@ mod tests {
             ("home/alice/.ssh/known_hosts", None),
             ("etc/rc.local", Some(Kind::RcLocal)),
             ("etc/rc.d/rc.local", Some(Kind::RcLocal)),
+            ("etc/rc.local.d/local.sh", Some(Kind::RcLocal)),
             ("etc/ld.so.preload", Some(Kind::LdSoPreload)),
             ("etc/sudoers", Some(Kind::Sudoers)),
             ("etc/sudoers.d/90-cloud-init-users", Some(Kind::Sudoers)),

@@ -67,7 +67,10 @@ pub enum Kind {
     /// `.ssh/authorized_keys` (and `authorized_keys2`): keys that may log in
     /// as the account whose home it's in.
     AuthorizedKeys,
-    /// `etc/rc.local`, `etc/rc.d/rc.local`: run by root at boot.
+    /// `etc/rc.local`, `etc/rc.d/rc.local`, and ESXi's
+    /// `etc/rc.local.d/local.sh` (kept across reboots, where ESXi rebuilds
+    /// most of `/etc`, which makes it the attackers' favourite there): run
+    /// by root at boot.
     RcLocal,
     /// Shell start-up files, run when an account logs in or opens a shell:
     /// `etc/profile`, `etc/profile.d/*.sh`, `etc/bash.bashrc`, a home's

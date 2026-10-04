@@ -211,6 +211,15 @@ fn boot_and_login_scripts() {
     );
     assert_eq!(flagged(&rc), [(5, vec![Flag::TemporaryDirectory])]);
 
+    // ESXi's boot script: a backdoor started, and a listening shell.
+    let esxi = read("etc/rc.local.d/local.sh");
+    assert_eq!(esxi.entries.len(), 3);
+    assert!(esxi
+        .entries
+        .iter()
+        .all(|e| e.user.as_deref() == Some("root")));
+    assert_eq!(flagged(&esxi), [(6, vec![Flag::ReverseShell])]);
+
     let profile = read("etc/profile.d/update.sh");
     assert_eq!(flagged(&profile), [(3, vec![Flag::TemporaryDirectory])]);
     assert_eq!(profile.entries[1].user, None);

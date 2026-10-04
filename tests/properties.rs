@@ -28,13 +28,14 @@ const KINDS: [Kind; 17] = [
     Kind::Modprobe,
 ];
 /// A fixture of each kind, with the path it's read as.
-const FIXTURES: [&str; 17] = [
+const FIXTURES: [&str; 18] = [
     "synthetic/var/spool/cron/crontabs/alice",
     "synthetic/etc/crontab",
     "synthetic/etc/anacrontab",
     "synthetic/etc/systemd/system/sysupdate.service",
     "synthetic/home/alice/.ssh/authorized_keys",
     "synthetic/etc/rc.local",
+    "synthetic/etc/rc.local.d/local.sh",
     "synthetic/home/alice/.bashrc",
     "synthetic/etc/ld.so.preload",
     "synthetic/etc/sudoers.d/90-backdoor",

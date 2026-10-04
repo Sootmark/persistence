@@ -1,6 +1,6 @@
 [package]
 name = "sootmark-persistence"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 rust-version = "1.80"
 description = "Where Linux and Unix attackers keep access: crontabs, at jobs, systemd units, init scripts, SSH authorized keys and sshd_config, rc.local and shell start-up files, ld.so.preload, sudoers, PAM, udev rules, XDG autostart and kernel modules, read into entries with what runs, as whom and when, and what looks suspicious."
