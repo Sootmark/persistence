@@ -25,6 +25,7 @@
 //! assert_eq!(flags(job), [Flag::TemporaryDirectory, Flag::AtReboot]);
 //! ```
 
+mod accounts;
 mod at;
 mod autostart;
 mod base64;
@@ -43,6 +44,7 @@ mod systemd;
 mod text;
 mod udev;
 
+pub use accounts::{Account, Password, PasswordState};
 pub use flags::{flags, Flag};
 pub use path::detect;
 
@@ -105,13 +107,20 @@ pub enum Kind {
     ModulesLoad,
     /// modprobe's configuration (`modprobe.d/*.conf`).
     Modprobe,
+    /// `etc/passwd`: the accounts, their ids and shells.
+    Passwd,
+    /// `etc/shadow`: the state of each account's password.
+    Shadow,
+    /// `etc/group`: the groups' members.
+    Group,
 }
 
 impl Kind {
     /// A short name: `crontab`, `system crontab`, `anacrontab`, `systemd
     /// unit`, `authorized keys`, `rc.local`, `shell init`, `ld.so.preload`,
     /// `sudoers`, `at job`, `init script`, `pam`, `sshd config`, `udev
-    /// rule`, `xdg autostart`, `modules load`, `modprobe`.
+    /// rule`, `xdg autostart`, `modules load`, `modprobe`, `passwd`,
+    /// `shadow`, `group`.
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
@@ -132,6 +141,9 @@ impl Kind {
             Self::XdgAutostart => "xdg autostart",
             Self::ModulesLoad => "modules load",
             Self::Modprobe => "modprobe",
+            Self::Passwd => "passwd",
+            Self::Shadow => "shadow",
+            Self::Group => "group",
         }
     }
 }
@@ -291,6 +303,20 @@ pub enum Detail {
         /// also the entry's command.
         arguments: String,
     },
+    /// An account of `etc/passwd`; its name is the entry's user.
+    Account(Account),
+    /// An account's password state, from `etc/shadow`; its name is the
+    /// entry's user.
+    Password(Password),
+    /// A group with members, from `etc/group`.
+    Group {
+        /// Its name.
+        name: String,
+        /// Its id.
+        gid: Option<u32>,
+        /// Its members, as listed (members by primary group aren't).
+        members: Vec<String>,
+    },
 }
 
 /// One `KEY{attribute}op"value"` pair of a udev rule.
@@ -406,5 +432,8 @@ pub fn parse(kind: Kind, data: &[u8], path: &str) -> Parsed {
         Kind::XdgAutostart => autostart::entry(&text, account),
         Kind::ModulesLoad => modules::load_list(&text),
         Kind::Modprobe => modules::modprobe(&text),
+        Kind::Passwd => accounts::passwd(&text),
+        Kind::Shadow => accounts::shadow(&text),
+        Kind::Group => accounts::group(&text),
     }
 }

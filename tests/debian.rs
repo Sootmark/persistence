@@ -24,7 +24,11 @@ const VENDORED: [(&str, Kind, usize); 4] = [
     ("usr/lib/systemd/system/ssh.socket", Kind::SystemdUnit, 6),
 ];
 /// Fetched by `tests/debian/fetch.sh`: path, kind and entry count.
-const FETCHED: [(&str, Kind, usize); 39] = [
+const FETCHED: [(&str, Kind, usize); 42] = [
+    ("etc/passwd", Kind::Passwd, 23),
+    ("etc/shadow", Kind::Shadow, 23),
+    // No group has listed members on a fresh system.
+    ("etc/group", Kind::Group, 0),
     ("etc/crontab", Kind::SystemCrontab, 6),
     ("etc/cron.d/anacron", Kind::SystemCrontab, 3),
     ("etc/cron.d/e2scrub_all", Kind::SystemCrontab, 2),

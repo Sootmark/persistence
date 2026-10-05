@@ -101,6 +101,9 @@ pub fn detect(path: &str) -> Option<Kind> {
             Kind::RcLocal
         }
         ["etc", "ld.so.preload"] => Kind::LdSoPreload,
+        ["etc", "passwd"] => Kind::Passwd,
+        ["etc", "shadow"] => Kind::Shadow,
+        ["etc", "group"] => Kind::Group,
         ["etc", "sudoers"]
         | ["etc", "sudoers.d", _]
         | ["usr", "local", "etc", "sudoers"]
@@ -254,6 +257,11 @@ mod tests {
             ("etc/rc.d/rc.local", Some(Kind::RcLocal)),
             ("etc/rc.local.d/local.sh", Some(Kind::RcLocal)),
             ("etc/ld.so.preload", Some(Kind::LdSoPreload)),
+            ("etc/passwd", Some(Kind::Passwd)),
+            ("etc/shadow", Some(Kind::Shadow)),
+            ("etc/group", Some(Kind::Group)),
+            ("etc/passwd-", None),
+            ("etc/gshadow", None),
             ("etc/sudoers", Some(Kind::Sudoers)),
             ("etc/sudoers.d/90-cloud-init-users", Some(Kind::Sudoers)),
             ("usr/local/etc/sudoers", Some(Kind::Sudoers)),

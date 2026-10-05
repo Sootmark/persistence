@@ -1,6 +1,6 @@
 //! One line saying what an entry does.
 
-use crate::{AuthorizedKey, Detail, Entry, SudoRule, UdevPair};
+use crate::{Account, AuthorizedKey, Detail, Entry, Password, SudoRule, UdevPair};
 
 impl Entry {
     /// What the entry does, in a line: `@reboot as root: /tmp/.x/run`,
@@ -76,6 +76,11 @@ impl Entry {
                 format!("at login{as_user}: {name}{command}{off}")
             }
             Detail::KernelModule => format!("kernel module loaded at boot: {command}"),
+            Detail::Account(account) => account_summary(self.user.as_deref(), account),
+            Detail::Password(password) => password_summary(self.user.as_deref(), password),
+            Detail::Group { name, members, .. } => {
+                format!("group {name}: {}", members.join(", "))
+            }
             Detail::ModprobeDirective {
                 directive,
                 module,
@@ -165,6 +170,37 @@ fn anacron_period(period: &str) -> String {
 
 fn parenthesised(user: Option<&str>) -> String {
     user.map(|user| format!(" ({user})")).unwrap_or_default()
+}
+
+/// `toor (uid 0): /bin/bash, home /root`.
+fn account_summary(user: Option<&str>, account: &Account) -> String {
+    let uid = account
+        .uid
+        .map_or_else(|| "?".to_owned(), |uid| uid.to_string());
+    let shell = if account.shell.is_empty() {
+        "no shell"
+    } else {
+        &account.shell
+    };
+    format!(
+        "{} (uid {uid}): {shell}, home {}",
+        user.unwrap_or("?"),
+        account.home
+    )
+}
+
+/// `svc: password empty, changed 2026-10-04`.
+fn password_summary(user: Option<&str>, password: &Password) -> String {
+    let changed = password
+        .last_change
+        .as_deref()
+        .map(|day| format!(", changed {day}"))
+        .unwrap_or_default();
+    format!(
+        "{}: password {}{changed}",
+        user.unwrap_or("?"),
+        password.state.label()
+    )
 }
 
 #[cfg(test)]

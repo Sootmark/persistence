@@ -364,3 +364,50 @@ fn udev_autostart_and_kernel_modules() {
         "kernel module loaded at boot: diamorphine"
     );
 }
+
+#[test]
+fn accounts() {
+    let passwd = read("etc/passwd");
+    assert_eq!(passwd.entries.len(), 6);
+    assert_eq!(
+        flagged(&passwd),
+        [
+            (3, vec![Flag::SystemAccountShell]),
+            (5, vec![Flag::UidZero]),
+            (6, vec![Flag::NoPasswordNeeded])
+        ]
+    );
+    assert_eq!(
+        passwd.entries[4].summary(),
+        "toor (uid 0): /bin/bash, home /root"
+    );
+
+    let shadow = read("etc/shadow");
+    let summaries: Vec<String> = shadow
+        .entries
+        .iter()
+        .map(persistence::Entry::summary)
+        .collect();
+    assert_eq!(
+        summaries,
+        [
+            "root: password yescrypt, changed 2024-10-04",
+            "daemon: password no password, changed 2024-10-04",
+            "www-data: password no password, changed 2024-10-04",
+            "alice: password locked, changed 2025-01-12",
+            "toor: password sha512crypt, changed 2026-10-04",
+            "svc-backup: password empty, changed 2026-10-04",
+        ]
+    );
+    assert_eq!(flagged(&shadow), [(6, vec![Flag::NoPasswordNeeded])]);
+    let Detail::Password(password) = &shadow.entries[5].detail else {
+        panic!("not a password");
+    };
+    assert_eq!(password.expires.as_deref(), Some("2026-12-13"));
+    // The hash is never kept.
+    assert!(!format!("{shadow:?}").contains("aGFzaA"));
+
+    let group = read("etc/group");
+    assert_eq!(group.entries.len(), 1);
+    assert_eq!(group.entries[0].summary(), "group sudo: alice, svc-backup");
+}

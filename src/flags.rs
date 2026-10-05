@@ -5,7 +5,7 @@
 
 use std::fmt;
 
-use crate::{Detail, Entry, Kind, PamRule};
+use crate::{Detail, Entry, Kind, PamRule, PasswordState};
 
 /// Where files vanish at reboot or that anyone can write to.
 const TEMPORARY_DIRECTORIES: [&str; 3] = ["/tmp", "/var/tmp", "/dev/shm"];
@@ -92,6 +92,16 @@ pub enum Flag {
     /// (`install`, `remove`), other than `/bin/true` or `/bin/false`, the
     /// usual way to block one.
     ModprobeCommand,
+    /// An account with id 0 other than root: root's power under another
+    /// name.
+    UidZero,
+    /// An account without a password (an empty field in `etc/passwd` or
+    /// `etc/shadow`): it logs in with none where PAM allows it.
+    NoPasswordNeeded,
+    /// A system account (id 1 to 999) whose shell lets it log in: a
+    /// service account turned into a way in (`www-data` given
+    /// `/bin/bash`). Some ship that way (`postgres` on Debian).
+    SystemAccountShell,
 }
 
 impl Flag {
@@ -114,6 +124,9 @@ impl Flag {
             Self::EmptyPasswords => "SSH logins without a password",
             Self::KeysElsewhere => "SSH keys read from elsewhere",
             Self::ModprobeCommand => "modprobe runs a command",
+            Self::UidZero => "id 0 besides root",
+            Self::NoPasswordNeeded => "no password needed",
+            Self::SystemAccountShell => "system account with a login shell",
         }
     }
 }
@@ -167,6 +180,12 @@ pub fn flags(entry: &Entry) -> Vec<Flag> {
         ),
         (Flag::KeysElsewhere, keys_elsewhere(entry)),
         (Flag::ModprobeCommand, modprobe_command(entry)),
+        (Flag::UidZero, uid_zero(entry)),
+        (Flag::NoPasswordNeeded, no_password_needed(&entry.detail)),
+        (
+            Flag::SystemAccountShell,
+            system_account_shell(&entry.detail),
+        ),
     ]
     .into_iter()
     .filter_map(|(flag, found)| found.then_some(flag))
@@ -319,6 +338,24 @@ fn modprobe_command(entry: &Entry) -> bool {
         )
     };
     entry.kind == Kind::Modprobe && entry.command.as_deref().is_some_and(|c| !blocks(c))
+}
+
+fn uid_zero(entry: &Entry) -> bool {
+    matches!(&entry.detail, Detail::Account(account) if account.uid == Some(0))
+        && entry.user.as_deref() != Some("root")
+}
+
+fn no_password_needed(detail: &Detail) -> bool {
+    match detail {
+        Detail::Account(account) => account.empty_password,
+        Detail::Password(password) => password.state == PasswordState::Empty,
+        _ => false,
+    }
+}
+
+fn system_account_shell(detail: &Detail) -> bool {
+    matches!(detail, Detail::Account(account)
+        if account.uid.is_some_and(|uid| (1..1000).contains(&uid)) && account.can_log_in())
 }
 
 #[cfg(test)]

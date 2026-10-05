@@ -37,7 +37,8 @@ docker run --rm -v "$out:/out" -e OWNER="$(id -u):$(id -g)" debian:trixie sh -eu
         usr/lib/udev/rules.d/50-udev-default.rules usr/lib/udev/rules.d/60-persistent-storage.rules \
         usr/lib/udev/rules.d/80-drivers.rules usr/lib/udev/rules.d/99-systemd.rules \
         usr/lib/modprobe.d/aliases.conf usr/lib/modprobe.d/fbdev-blacklist.conf \
-        usr/lib/modprobe.d/systemd.conf etc/modules-load.d/modules.conf
+        usr/lib/modprobe.d/systemd.conf etc/modules-load.d/modules.conf \
+        etc/passwd etc/shadow etc/group
     do
         mkdir -p "/out/$(dirname "$file")"
         cp "$file" "/out/$file"
