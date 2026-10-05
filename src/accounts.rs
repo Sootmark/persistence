@@ -5,6 +5,8 @@
 //! account given a shell, a password left empty, an unexpected member of
 //! `sudo` or `wheel`, and the day a password last changed.
 
+use common::time::civil_from_days;
+
 use crate::{Detail, Entry, Kind, Parsed};
 
 /// Shells that refuse a login, or run one command and end (Red Hat's
@@ -21,8 +23,6 @@ const NO_LOGIN: [&str; 10] = [
     "/sbin/halt",
     "/usr/sbin/halt",
 ];
-/// Days from 1970-01-01 to 0000-03-01, for the civil date of a day count.
-const DAYS_TO_EPOCH: i64 = 719_468;
 
 /// An account of `etc/passwd`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -214,26 +214,12 @@ fn scheme(hash: &str) -> &'static str {
 }
 
 /// Days since 1970-01-01 as a civil date (`2026-10-04`); `None` for 0 and
-/// below (unset, or "change at next login") and absurd counts.
+/// below (unset, or "change at next login") and counts past year 9999.
 fn civil_date(days: i64) -> Option<String> {
     if !(1..=2_932_896).contains(&days) {
         return None;
     }
-    // Howard Hinnant's days-from-civil, inverted.
-    let z = days + DAYS_TO_EPOCH;
-    let era = z.div_euclid(146_097);
-    let day_of_era = z.rem_euclid(146_097);
-    let year_of_era =
-        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_index = (5 * day_of_year + 2) / 153;
-    let day = day_of_year - (153 * month_index + 2) / 5 + 1;
-    let month = if month_index < 10 {
-        month_index + 3
-    } else {
-        month_index - 9
-    };
-    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    let (year, month, day) = civil_from_days(days);
     Some(format!("{year:04}-{month:02}-{day:02}"))
 }
 
